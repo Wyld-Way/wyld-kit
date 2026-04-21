@@ -1,5 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import type { OrgService, Organization, OrgMembership, OrgPublicInfo } from '../services/org.service'
+import type {
+  OrgService,
+  Organization,
+  OrgMembership,
+  OrgPublicInfo,
+  OrgGuideLink,
+  OrgGuideStatus,
+} from '../services/org.service'
 
 /**
  * React Query hooks for the org model. Pass a service instance.
@@ -83,6 +90,92 @@ export function createOrgHooks(service: OrgService) {
     })
   }
 
+  // ─── Institution guide management hooks ───
+
+  function useOrgGuides(slug: string | null, status?: OrgGuideStatus) {
+    return useQuery<OrgGuideLink[]>({
+      queryKey: ['organizations', 'slug', slug, 'guides', status ?? 'all'],
+      queryFn: () => service.listOrgGuides(slug!, status),
+      enabled: !!slug,
+      retry: false,
+    })
+  }
+
+  /** Find the current user's membership for a given org slug. Pulls from /mine. */
+  function useCurrentOrgMembership(slug: string | null) {
+    const { data, isLoading } = useMyOrgs()
+    const membership = (data ?? []).find((m) => m.organization?.slug === slug) ?? null
+    return {
+      membership,
+      isAdmin: membership?.role === 'admin' && membership.status === 'active',
+      isMember: membership?.status === 'active',
+      isLoading,
+    }
+  }
+
+  function useApproveOrgGuide(slug: string, options?: {
+    onSuccess?: (data: OrgGuideLink) => void
+    onError?: (error: unknown) => void
+  }) {
+    const queryClient = useQueryClient()
+    return useMutation({
+      mutationFn: (guideUserId: string) => service.approveOrgGuide(slug, guideUserId),
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: ['organizations', 'slug', slug, 'guides'] })
+        options?.onSuccess?.(data)
+      },
+      onError: options?.onError,
+    })
+  }
+
+  function useRejectOrgGuide(slug: string, options?: {
+    onSuccess?: (data: OrgGuideLink) => void
+    onError?: (error: unknown) => void
+  }) {
+    const queryClient = useQueryClient()
+    return useMutation({
+      mutationFn: ({ guideUserId, rejectionReason }: { guideUserId: string; rejectionReason?: string }) =>
+        service.rejectOrgGuide(slug, guideUserId, rejectionReason),
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: ['organizations', 'slug', slug, 'guides'] })
+        options?.onSuccess?.(data)
+      },
+      onError: options?.onError,
+    })
+  }
+
+  function useSetOrgGuideFeatured(slug: string, options?: {
+    onSuccess?: (data: OrgGuideLink) => void
+    onError?: (error: unknown) => void
+  }) {
+    const queryClient = useQueryClient()
+    return useMutation({
+      mutationFn: ({ guideUserId, isFeatured }: { guideUserId: string; isFeatured: boolean }) =>
+        service.setOrgGuideFeatured(slug, guideUserId, isFeatured),
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: ['organizations', 'slug', slug, 'guides'] })
+        options?.onSuccess?.(data)
+      },
+      onError: options?.onError,
+    })
+  }
+
+  function useUpdateOrgProfile(slug: string, options?: {
+    onSuccess?: (data: Organization) => void
+    onError?: (error: unknown) => void
+  }) {
+    const queryClient = useQueryClient()
+    return useMutation({
+      mutationFn: (patch: { name?: string; logo_url?: string; metadata?: Record<string, unknown> }) =>
+        service.updateOrgProfile(slug, patch),
+      onSuccess: (data) => {
+        queryClient.invalidateQueries({ queryKey: ['organizations'] })
+        options?.onSuccess?.(data)
+      },
+      onError: options?.onError,
+    })
+  }
+
   return {
     useMyOrgs,
     useMySchool,
@@ -90,5 +183,11 @@ export function createOrgHooks(service: OrgService) {
     useCreateOrg,
     useJoinOrg,
     useUpdateMyMetadata,
+    useOrgGuides,
+    useCurrentOrgMembership,
+    useApproveOrgGuide,
+    useRejectOrgGuide,
+    useSetOrgGuideFeatured,
+    useUpdateOrgProfile,
   }
 }

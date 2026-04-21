@@ -1,10 +1,12 @@
 import type { AxiosInstance } from 'axios'
 
+export type OrgType = 'school' | 'directory' | 'company' | 'training_institution'
+
 export interface Organization {
   id: string
   name: string
   slug: string
-  type: 'school' | 'directory' | 'company'
+  type: OrgType
   join_code: string | null
   logo_url: string | null
   stripe_customer_id: string | null
@@ -27,6 +29,40 @@ export interface OrgPublicInfo {
   name: string
   type: string
   logo_url: string | null
+}
+
+export type OrgGuideStatus = 'pending' | 'approved' | 'rejected'
+
+export interface OrgGuideLink {
+  id: string
+  org_id: string
+  guide_id: string
+  status: OrgGuideStatus
+  is_featured: boolean
+  position: number | null
+  requested_at: string
+  reviewed_at: string | null
+  reviewed_by_user_id: string | null
+  rejection_reason: string | null
+  featured_at: string | null
+  guide?: {
+    id: string
+    first_name: string | null
+    last_name: string | null
+    email: string | null
+    profile_photo: string | null
+    guidUser: {
+      id: string
+      profile_name: string | null
+      slug: string | null
+      cover_image: string | null
+      address: string | null
+      about: string | null
+      skills: string[]
+      certifications: string[]
+      is_verified: boolean
+    } | null
+  }
 }
 
 /**
@@ -90,6 +126,65 @@ export function createOrgService(client: AxiosInstance) {
         status: string
         data: { hasAccess: boolean; source: 'individual' | 'organization' | null; org?: Organization }
       }>('/organizations/access')
+      return res.data.data
+    },
+
+    // ─── Institution guide management (slug-scoped) ───
+
+    async requestOrgGuide(slug: string): Promise<OrgGuideLink> {
+      const res = await client.post<{ status: string; data: OrgGuideLink }>(
+        `/organizations/slug/${slug}/guides/request`
+      )
+      return res.data.data
+    },
+
+    async listOrgGuides(slug: string, status?: OrgGuideStatus): Promise<OrgGuideLink[]> {
+      const params = status ? `?status=${status}` : ''
+      const res = await client.get<{ status: string; data: OrgGuideLink[] }>(
+        `/organizations/slug/${slug}/guides${params}`
+      )
+      return res.data.data
+    },
+
+    async approveOrgGuide(slug: string, guideUserId: string): Promise<OrgGuideLink> {
+      const res = await client.post<{ status: string; data: OrgGuideLink }>(
+        `/organizations/slug/${slug}/guides/${guideUserId}/approve`
+      )
+      return res.data.data
+    },
+
+    async rejectOrgGuide(
+      slug: string,
+      guideUserId: string,
+      rejectionReason?: string
+    ): Promise<OrgGuideLink> {
+      const res = await client.post<{ status: string; data: OrgGuideLink }>(
+        `/organizations/slug/${slug}/guides/${guideUserId}/reject`,
+        { rejection_reason: rejectionReason }
+      )
+      return res.data.data
+    },
+
+    async setOrgGuideFeatured(
+      slug: string,
+      guideUserId: string,
+      isFeatured: boolean
+    ): Promise<OrgGuideLink> {
+      const res = await client.patch<{ status: string; data: OrgGuideLink }>(
+        `/organizations/slug/${slug}/guides/${guideUserId}/featured`,
+        { is_featured: isFeatured }
+      )
+      return res.data.data
+    },
+
+    async updateOrgProfile(
+      slug: string,
+      patch: { name?: string; logo_url?: string; metadata?: Record<string, unknown> }
+    ): Promise<Organization> {
+      const res = await client.patch<{ status: string; data: Organization }>(
+        `/organizations/slug/${slug}`,
+        patch
+      )
       return res.data.data
     },
   }
