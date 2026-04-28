@@ -57,7 +57,13 @@ We tried file: references (Vercel can't resolve them), github: references (Verce
 | `useRequireAuth` | Hook | Auth guard -- redirects if not authenticated |
 | `createOrgService` | Factory | Org API service (create, join, list, update) |
 | `createOrgHooks` | Factory | React Query hooks for orgs |
+| `createAuthService` | Factory | Login (email/pw, Google, Apple), forgot/reset password, fetchMe, fetchMeFull (user + memberships), logout |
+| `createS3UploadService` | Factory | S3 direct browser upload with graceful degradation when AWS env unset |
 | `AddressAutocomplete` | Component | Mapbox address search with dropdown |
+
+### Selective copy is encouraged
+
+Not every consumer needs every export. Kripa skips `createOrgService`/`createOrgHooks` (uses raw fetch, no React Query) and `AddressAutocomplete` (no Mapbox SDK in their deps). Only copy `services/<name>.ts` files you'll actually use, and trim the local `index.ts` to match — otherwise an unused import drags peer deps into your bundle.
 
 ## Usage
 
@@ -90,6 +96,43 @@ const orgService = createOrgService(client)
 export const { useMySchool, useCreateOrg, useJoinOrg } = createOrgHooks(orgService)
 ```
 
+### Auth service
+
+```tsx
+// src/lib/api/user-auth.ts (create once per app)
+import http, { setStoredToken } from './http-client'
+import { createAuthService } from '@/lib/wyld-kit'
+
+const auth = createAuthService(http, {
+  storage: { setToken: setStoredToken },
+})
+
+export const { login, googleLogin, appleLogin, forgotPassword, resetPassword, fetchMe, fetchMeFull, logout } = auth
+```
+
+Apps wrap to add localStorage user persistence or app-specific behavior (Kripa does this). The kit doesn't assume how each app persists session state — pass a storage adapter or skip it.
+
+### S3 upload
+
+```tsx
+import { createS3UploadService, FOLDERS } from '@/lib/wyld-kit'
+
+const uploader = createS3UploadService({
+  region: process.env.NEXT_PUBLIC_AWS_S3_REGION_NAME,
+  accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY,
+  bucket: process.env.NEXT_PUBLIC_AWS_STORAGE_BUCKET_NAME,
+})
+
+// In a component:
+if (uploader.isConfigured) {
+  const filename = await uploader.upload(file, FOLDERS.GUIDE_COVER)
+  // filename is what you save to the backend, not the full URL
+}
+```
+
+`isConfigured` is `false` when any AWS env value is missing — UI should hide the upload affordance, NOT throw. `aws-sdk` lazy-imports inside `upload()` so the bundle only ships when actually used.
+
 ### Address autocomplete
 
 ```tsx
@@ -117,9 +160,12 @@ Requires `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` env var, or pass `mapboxToken` prop.
 
 ## Roadmap
 
-### Now (v0.1 -- shipped)
-- useRequireAuth, org hooks/service, AddressAutocomplete
-- Consumed by: Schools
+### Now (v0.2 -- shipped 2026-04-28)
+- useRequireAuth, org hooks/service, AddressAutocomplete (v0.1)
+- createAuthService (login + OAuth + password reset + fetchMeFull) (v0.2)
+- createS3UploadService (graceful-degrading direct uploads) (v0.2)
+- Consumed by: Schools, Kripa (selective subset)
+- **Drift watch:** when you sync canonical → app, list which files actually changed in the commit message so other repos know what to pull. There is no CI check for sync drift today.
 
 ### Next (when needed)
 - Migrate `rewyld/src/lib/auth/` here (AuthProvider, AuthGuard, useLogin, etc.)
