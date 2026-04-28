@@ -37,6 +37,17 @@ export interface LoginResponse {
 
 export interface AuthService {
   login(payload: LoginPayload): Promise<LoginResponse>
+  /**
+   * Google OAuth login. Pass the idToken (Google's "credential" string)
+   * from @react-oauth/google's GoogleLogin onSuccess callback.
+   * Backend route: POST /v1/auth/google-login
+   */
+  googleLogin(idToken: string): Promise<LoginResponse>
+  /**
+   * Apple OAuth login. Pass the id_token from Apple's auth response.
+   * Backend route: POST /v1/auth/apple-login
+   */
+  appleLogin(idToken: string): Promise<LoginResponse>
   forgotPassword(email: string): Promise<{ message?: string }>
   resetPassword(
     token: string,
@@ -86,6 +97,28 @@ export function createAuthService(
       const data = envelope?.data
       if (!data || !data.token) {
         throw new Error('Login response missing token')
+      }
+      opts.storage?.setToken(data.token)
+      return data
+    },
+
+    async googleLogin(idToken) {
+      const res = await client.post('/auth/google-login', { idToken })
+      const envelope = res.data as { status?: string; data?: LoginResponse }
+      const data = envelope?.data
+      if (!data || !data.token) {
+        throw new Error('Google login response missing token')
+      }
+      opts.storage?.setToken(data.token)
+      return data
+    },
+
+    async appleLogin(idToken) {
+      const res = await client.post('/auth/apple-login', { idToken })
+      const envelope = res.data as { status?: string; data?: LoginResponse }
+      const data = envelope?.data
+      if (!data || !data.token) {
+        throw new Error('Apple login response missing token')
       }
       opts.storage?.setToken(data.token)
       return data
