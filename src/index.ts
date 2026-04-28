@@ -20,6 +20,8 @@ export type {
   AuthUser,
   LoginPayload,
   LoginResponse,
+  MembershipInfo,
+  MeFullResponse,
 } from './services/auth.service'
 
 export { createS3UploadService, FOLDERS } from './services/s3-upload.service'

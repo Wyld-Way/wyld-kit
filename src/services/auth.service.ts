@@ -35,6 +35,24 @@ export interface LoginResponse {
   user: AuthUser
 }
 
+export interface MembershipInfo {
+  org_id: string
+  role: string
+  status: string
+  organization: {
+    id: string
+    slug: string
+    name: string
+    type: string
+    logo_url: string | null
+  } | null
+}
+
+export interface MeFullResponse {
+  user: AuthUser
+  memberships: MembershipInfo[]
+}
+
 export interface AuthService {
   login(payload: LoginPayload): Promise<LoginResponse>
   /**
@@ -54,7 +72,17 @@ export interface AuthService {
     newPassword: string,
     confirmPassword: string
   ): Promise<{ message?: string }>
+  /**
+   * Legacy /v1/auth/user-details. Stays alive for iOS app + any consumer
+   * that doesn't need memberships. Returns user-only shape.
+   */
   fetchMe(): Promise<AuthUser>
+  /**
+   * /v1/auth/me — unified endpoint returning user + active org
+   * memberships in one round-trip. Tenant apps (Kripa, Schools) should
+   * prefer this over fetchMe + a separate /organizations/mine call.
+   */
+  fetchMeFull(): Promise<MeFullResponse>
   logout(): void
 }
 
@@ -150,6 +178,18 @@ export function createAuthService(
       const envelope = res.data as { status?: string; data?: AuthUser }
       if (!envelope?.data) throw new Error('No user details returned')
       return envelope.data
+    },
+
+    async fetchMeFull() {
+      const res = await client.get('/auth/me')
+      const envelope = res.data as {
+        status?: string
+        data?: AuthUser & { memberships?: MembershipInfo[] }
+      }
+      const data = envelope?.data
+      if (!data) throw new Error('No user details returned from /auth/me')
+      const { memberships = [], ...user } = data
+      return { user, memberships }
     },
 
     logout() {
