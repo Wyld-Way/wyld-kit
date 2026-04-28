@@ -36,6 +36,12 @@ export interface LoginResponse {
 }
 
 export interface MembershipInfo {
+  /** tbl_organization_membership.id — needed by callers that mutate
+   * specific membership rows (e.g. role updates, leave-org). */
+  id: string
+  /** tbl_organization_membership.user_id — same as the wrapping user;
+   * present for callers expecting the full row shape. */
+  user_id: string
   org_id: string
   role: string
   status: string
