@@ -5,6 +5,15 @@
   "description": "Shared hooks, components, and services for the Wyld Way ecosystem",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./auth": "./src/services/auth.service.ts",
+    "./s3": "./src/services/s3-upload.service.ts",
+    "./org": "./src/services/org.service.ts",
+    "./hooks/use-require-auth": "./src/hooks/useRequireAuth.ts",
+    "./hooks/use-org": "./src/hooks/useOrg.ts",
+    "./components/address-autocomplete": "./src/components/AddressAutocomplete.tsx"
+  },
   "peerDependencies": {
     "@mapbox/mapbox-sdk": ">=0.15",
     "@tanstack/react-query": ">=5",
@@ -12,6 +21,11 @@
     "next": ">=14",
     "react": ">=18",
     "react-toastify": ">=10"
+  },
+  "peerDependenciesMeta": {
+    "@mapbox/mapbox-sdk": { "optional": true },
+    "@tanstack/react-query": { "optional": true },
+    "react-toastify": { "optional": true }
   },
   "devDependencies": {
     "@tanstack/react-query": "^5.95.2",
