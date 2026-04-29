@@ -4,66 +4,70 @@ Shared hooks, components, and services for the Wyld Way ecosystem.
 
 ## How it works
 
-This repo is the **canonical source** for shared code. Each consuming app copies the source files into its own `src/lib/wyld-kit/` directory. No npm publish, no symlinks, no registry.
+Real package. Consumers install from this GitHub repo:
 
-```
-packages/wyld-kit/src/     <-- canonical source (this repo)
-  |
-  |-- copy to -->  Schools/web/src/lib/wyld-kit/
-  |-- copy to -->  rewyld/src/lib/wyld-kit/        (future)
-  |-- copy to -->  wyldwalk/src/lib/wyld-kit/       (future)
+```json
+{
+  "dependencies": {
+    "@wyld/kit": "github:Wyld-Way/wyld-kit#main"
+  }
+}
 ```
 
-### To add wyld-kit to a new repo
+Then in `next.config.{ts,js}`:
+
+```ts
+const nextConfig = {
+  transpilePackages: ['@wyld/kit'],
+  // ...
+}
+```
+
+Kit ships raw TypeScript; Next.js compiles it via SWC at consumer build time.
+
+## Imports — subpath, not root
+
+The kit re-exports everything from `src/index.ts`, but importing from the root pulls every peer dep transitively. **Use subpath imports** so each consumer pulls only the surfaces it needs.
+
+| Subpath | What you get | Peer deps it activates |
+|---------|--------------|------------------------|
+| `@wyld/kit/auth` | `createAuthService` + types | `axios` |
+| `@wyld/kit/s3` | `createS3UploadService`, `FOLDERS` | (none — uses consumer's `aws-sdk` lazily) |
+| `@wyld/kit/org` | `createOrgService` + types | `axios` |
+| `@wyld/kit/hooks/use-require-auth` | `useRequireAuth` | `react`, `next` |
+| `@wyld/kit/hooks/use-org` | `createOrgHooks` | `@tanstack/react-query` |
+| `@wyld/kit/components/address-autocomplete` | `AddressAutocomplete` (default) + types | `@mapbox/mapbox-sdk` |
+
+`mapbox-sdk`, `react-query`, and `react-toastify` are declared as **optional** peer deps (`peerDependenciesMeta`), so consumers that don't import those subpaths don't have to install them.
+
+## Updating the kit
 
 ```bash
-# From the consuming repo's root
-mkdir -p src/lib/wyld-kit
-cp -r ../../packages/wyld-kit/src/* src/lib/wyld-kit/
+cd packages/wyld-kit
+# edit src/, update exports map in package.json if you added a subpath
+git add . && git commit && git push origin main
 ```
 
-Then import with `@/lib/wyld-kit`:
-```tsx
-import { useRequireAuth } from '@/lib/wyld-kit'
-import AddressAutocomplete from '@/lib/wyld-kit/components/AddressAutocomplete'
-```
-
-### To sync after changes
-
-If you edit wyld-kit in one repo and want to update the canonical source:
+Consumers don't auto-rebuild on kit push. To pull the new commit per consumer:
 
 ```bash
-# 1. Copy your changes back to canonical
-cp -r src/lib/wyld-kit/* ../../packages/wyld-kit/src/
-
-# 2. Commit in wyld-kit repo
-cd ../../packages/wyld-kit && git add -A && git commit -m "update from [repo-name]" && git push
-
-# 3. Copy to other repos that use it
-cd ../../Schools\ \(Nature\ People\)/web
-cp -r ../../packages/wyld-kit/src/* src/lib/wyld-kit/
+cd <consumer-repo>
+npm update @wyld/kit
+git add package-lock.json && git commit -m "chore(kit): bump @wyld/kit" && git push
 ```
 
-### Why not npm?
-
-We tried file: references (Vercel can't resolve them), github: references (Vercel can't auth to private repos), and evaluated npm publish. For a 3-person team with fast-changing shared code, the copy approach is simplest. When the shared code stabilizes and we have 3+ consumers, we'll publish to npm.
-
----
+Vercel deploys the consumer with the new lockfile-pinned commit hash.
 
 ## What's inside
 
-| Export | Type | What it does |
-|--------|------|-------------|
-| `useRequireAuth` | Hook | Auth guard -- redirects if not authenticated |
-| `createOrgService` | Factory | Org API service (create, join, list, update) |
-| `createOrgHooks` | Factory | React Query hooks for orgs |
-| `createAuthService` | Factory | Login (email/pw, Google, Apple), forgot/reset password, fetchMe, fetchMeFull (user + memberships), logout |
-| `createS3UploadService` | Factory | S3 direct browser upload with graceful degradation when AWS env unset |
-| `AddressAutocomplete` | Component | Mapbox address search with dropdown |
-
-### Selective copy is encouraged
-
-Not every consumer needs every export. Kripa skips `createOrgService`/`createOrgHooks` (uses raw fetch, no React Query) and `AddressAutocomplete` (no Mapbox SDK in their deps). Only copy `services/<name>.ts` files you'll actually use, and trim the local `index.ts` to match — otherwise an unused import drags peer deps into your bundle.
+| Subpath | Type | What it does |
+|---|---|---|
+| `auth` | Factory | Login (email/pw, Google, Apple), forgot/reset, fetchMe, fetchMeFull, logout |
+| `s3` | Factory | S3 direct browser upload with graceful degradation when AWS env unset |
+| `org` | Factory | Org CRUD (create, join, list, update, members) |
+| `hooks/use-require-auth` | Hook | Auth guard — redirects if not authenticated |
+| `hooks/use-org` | Hook factory | React Query hooks for orgs |
+| `components/address-autocomplete` | Component | Mapbox address search with dropdown |
 
 ## Usage
 
@@ -71,7 +75,7 @@ Not every consumer needs every export. Kripa skips `createOrgService`/`createOrg
 
 ```tsx
 import { useAuth } from '@/lib/auth'
-import { useRequireAuth } from '@/lib/wyld-kit'
+import { useRequireAuth } from '@wyld/kit/hooks/use-require-auth'
 
 export default function ProtectedPage() {
   const { isAuthenticated, isLoading } = useAuth()
@@ -90,7 +94,8 @@ export default function ProtectedPage() {
 ```tsx
 // src/lib/orgHooks.ts (create once per app)
 import client from '@/libs/HttpClients'
-import { createOrgService, createOrgHooks } from '@/lib/wyld-kit'
+import { createOrgService } from '@wyld/kit/org'
+import { createOrgHooks } from '@wyld/kit/hooks/use-org'
 
 const orgService = createOrgService(client)
 export const { useMySchool, useCreateOrg, useJoinOrg } = createOrgHooks(orgService)
@@ -101,21 +106,25 @@ export const { useMySchool, useCreateOrg, useJoinOrg } = createOrgHooks(orgServi
 ```tsx
 // src/lib/api/user-auth.ts (create once per app)
 import http, { setStoredToken } from './http-client'
-import { createAuthService } from '@/lib/wyld-kit'
+import { createAuthService } from '@wyld/kit/auth'
 
 const auth = createAuthService(http, {
   storage: { setToken: setStoredToken },
 })
 
-export const { login, googleLogin, appleLogin, forgotPassword, resetPassword, fetchMe, fetchMeFull, logout } = auth
+export const {
+  login, googleLogin, appleLogin,
+  forgotPassword, resetPassword,
+  fetchMe, fetchMeFull, logout,
+} = auth
 ```
 
-Apps wrap to add localStorage user persistence or app-specific behavior (Kripa does this). The kit doesn't assume how each app persists session state — pass a storage adapter or skip it.
+Apps can wrap to add localStorage user persistence or app-specific behavior. The kit doesn't assume how each app persists session state — pass a storage adapter or skip it.
 
 ### S3 upload
 
 ```tsx
-import { createS3UploadService, FOLDERS } from '@/lib/wyld-kit'
+import { createS3UploadService, FOLDERS } from '@wyld/kit/s3'
 
 const uploader = createS3UploadService({
   region: process.env.NEXT_PUBLIC_AWS_S3_REGION_NAME,
@@ -124,7 +133,6 @@ const uploader = createS3UploadService({
   bucket: process.env.NEXT_PUBLIC_AWS_STORAGE_BUCKET_NAME,
 })
 
-// In a component:
 if (uploader.isConfigured) {
   const filename = await uploader.upload(file, FOLDERS.GUIDE_COVER)
   // filename is what you save to the backend, not the full URL
@@ -136,12 +144,12 @@ if (uploader.isConfigured) {
 ### Address autocomplete
 
 ```tsx
-import AddressAutocomplete from '@/lib/wyld-kit/components/AddressAutocomplete'
+import AddressAutocomplete, { type LocationResult } from '@wyld/kit/components/address-autocomplete'
 
 <AddressAutocomplete
   value={address}
   onChange={setAddress}
-  onSelect={(result) => {
+  onSelect={(result: LocationResult) => {
     // result: { address, lat, lng, country }
   }}
   inputClassName="your-tailwind-classes"
@@ -153,26 +161,16 @@ Requires `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` env var, or pass `mapboxToken` prop.
 
 ## Design principles
 
-- **Factory pattern**: Services and hooks take your app's axios client. No singletons.
-- **No build step**: Consumed as TypeScript source. Your app's bundler compiles it.
-- **Styling**: Components accept className props. No hardcoded brand colors.
-- **Copy, don't link**: Each repo owns its copy. Canonical source is this repo.
+- **Factory pattern**: services and hooks take the consumer's axios client. No singletons.
+- **No build step**: consumed as TypeScript source. Consumer's bundler compiles it.
+- **Styling**: components accept className props. No hardcoded brand colors.
+- **Surgical imports**: every shared piece is its own subpath so peer deps stay isolated.
 
-## Roadmap
+## Current consumers
 
-### Now (v0.2 -- shipped 2026-04-28)
-- useRequireAuth, org hooks/service, AddressAutocomplete (v0.1)
-- createAuthService (login + OAuth + password reset + fetchMeFull) (v0.2)
-- createS3UploadService (graceful-degrading direct uploads) (v0.2)
-- Consumed by: Schools, Kripa (selective subset)
-- **Drift watch:** when you sync canonical → app, list which files actually changed in the commit message so other repos know what to pull. There is no CI check for sync drift today.
+- `Wyld-Way/kripa` — 5 tenant Vercel projects (kripa, earthbased, rewyld-directory, theforesttherapyschool, kripalu-alumni). Uses `@wyld/kit/auth` + `@wyld/kit/s3`.
+- `Wyld-Way/nature-class` (Schools) — uses `@wyld/kit/hooks/use-require-auth` + `@wyld/kit/components/address-autocomplete`.
 
-### Next (when needed)
-- Migrate `rewyld/src/lib/auth/` here (AuthProvider, AuthGuard, useLogin, etc.)
-- Migrate `rewyld/src/lib/marketplace/` here (GuideCard, EventCard, ClusteredMap, themes)
-- Consume from: Rewyld, WyldWalk, Kripalu
+## History
 
-### Later (when shared code stabilizes)
-- Publish to npm as `@wyld/kit` (public, free)
-- `npm install @wyld/kit` in every repo, no more copying
-- Trigger: 3+ consumers, shared code changes less than monthly
+Pre-2026-04-29 the kit was mirrored as embedded copies in each consumer (`src/lib/wyld-kit/`) with a manual `cp` sync. The 2026-04-29 migration converted it to a real package: subpath exports + optional peer deps + public repo. Drift class eliminated.
