@@ -12,7 +12,8 @@
     "./org": "./src/services/org.service.ts",
     "./hooks/use-require-auth": "./src/hooks/useRequireAuth.ts",
     "./hooks/use-org": "./src/hooks/useOrg.ts",
-    "./components/address-autocomplete": "./src/components/AddressAutocomplete.tsx"
+    "./components/address-autocomplete": "./src/components/AddressAutocomplete.tsx",
+    "./utils/url": "./src/utils/url.ts"
   },
   "peerDependencies": {
     "@mapbox/mapbox-sdk": ">=0.15",
