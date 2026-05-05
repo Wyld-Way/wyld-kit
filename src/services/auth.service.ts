@@ -3,17 +3,31 @@ import type { AxiosInstance } from 'axios'
 // Shared auth client. App provides its own axios instance (so it
 // keeps its own bearer-token interceptor, baseURL, error handling).
 // Service exposes the standard auth surface every app needs:
-// login, password reset, current-user, logout.
+// login, signup, password reset, change password, email verification,
+// OAuth (Google + Apple), profile updates, current-user, logout.
 //
 // Backend routes (consumer-app surface):
 //   POST /v1/auth/login
+//   POST /v1/auth/signup
+//   POST /v1/auth/google-login
+//   POST /v1/auth/apple-login
 //   POST /v1/auth/forgot-password
 //   POST /v1/auth/reset-password
+//   POST /v1/auth/change-password
+//   POST /v1/auth/verify-account
+//   POST /v1/auth/resend-email
+//   PATCH /v1/auth/edit-profile
 //   GET  /v1/auth/user-details
+//   GET  /v1/auth/me
 //
 // Note: paths here OMIT the `/v1` prefix because each app's axios
 // baseURL already includes it (per ecosystem convention). If your
 // client doesn't, set baseURL to include `/v1` before constructing.
+//
+// Admin auth duality (separate /v1/admin/auth/login + admin user
+// details) is INTENTIONALLY not lifted — kit consolidates on the
+// unified /v1/auth/* routes with role-gated access via memberships.
+// See rewyld-to-kripa-port-audit.md opportunity #2.
 
 export interface AuthUser {
   id: string | number
@@ -30,9 +44,29 @@ export interface LoginPayload {
   recaptchaV2Token?: string
 }
 
+export interface SignupPayload {
+  first_name: string
+  last_name: string
+  email: string
+  password: string
+  /** Optional referral code from a guide's share link. */
+  referral_code?: string
+  recaptchaV2Token?: string
+  /** Legacy v3 token; some callers still send both. */
+  recaptchaToken?: string
+}
+
 export interface LoginResponse {
   token: string
   user: AuthUser
+}
+
+export interface ProfileUpdatePayload {
+  first_name?: string
+  last_name?: string
+  /** Multipart File. Sends as form-data; backend reads from
+   * req.files.profile_photo. */
+  profile_photo?: File
 }
 
 export interface MembershipInfo {
@@ -62,6 +96,12 @@ export interface MeFullResponse {
 export interface AuthService {
   login(payload: LoginPayload): Promise<LoginResponse>
   /**
+   * Self-signup. Backend issues a JWT in the response so the user is
+   * auto-logged-in (`storage.setToken` runs on success).
+   * Backend route: POST /v1/auth/signup
+   */
+  signup(payload: SignupPayload): Promise<LoginResponse>
+  /**
    * Google OAuth login. Pass the idToken (Google's "credential" string)
    * from @react-oauth/google's GoogleLogin onSuccess callback.
    * Backend route: POST /v1/auth/google-login
@@ -78,6 +118,36 @@ export interface AuthService {
     newPassword: string,
     confirmPassword: string
   ): Promise<{ message?: string }>
+  /**
+   * Authenticated password change. Requires a valid bearer token on
+   * the underlying axios client.
+   * Backend route: POST /v1/auth/change-password
+   */
+  changePassword(
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string
+  ): Promise<{ message?: string }>
+  /**
+   * Email verification — exchanges the token from the verification
+   * email for a JWT (auto-login post-verification).
+   * Backend route: POST /v1/auth/verify-account
+   */
+  verifyAccount(token: string): Promise<LoginResponse>
+  /**
+   * Resend the verification email. Returns success regardless of
+   * whether the email exists (prevents enumeration); surface the
+   * message to the user as-is.
+   * Backend route: POST /v1/auth/resend-email
+   */
+  resendVerificationEmail(email: string): Promise<{ message?: string }>
+  /**
+   * Generic user profile update — first_name, last_name, and the
+   * round profile photo. NOT for guide-profile fields (bio, skills,
+   * audiences, cover, gallery) — those go through guide.update-profile.
+   * Backend route: PATCH /v1/auth/edit-profile
+   */
+  updateProfile(payload: ProfileUpdatePayload): Promise<{ user?: AuthUser; message?: string }>
   /**
    * Legacy /v1/auth/user-details. Stays alive for iOS app + any consumer
    * that doesn't need memberships. Returns user-only shape.
@@ -136,6 +206,29 @@ export function createAuthService(
       return data
     },
 
+    async signup(payload) {
+      const body: Record<string, unknown> = {
+        login_type: 'S',
+        first_name: payload.first_name.trim(),
+        last_name: payload.last_name.trim(),
+        email: payload.email.trim().toLowerCase(),
+        password: payload.password,
+        termsAndPrivacy: true,
+      }
+      if (payload.referral_code) body.referral_code = payload.referral_code
+      if (payload.recaptchaV2Token) body.recaptchaV2Token = payload.recaptchaV2Token
+      if (payload.recaptchaToken) body.recaptchaToken = payload.recaptchaToken
+
+      const res = await client.post('/auth/signup', body)
+      const envelope = res.data as { status?: string; data?: LoginResponse }
+      const data = envelope?.data
+      if (!data || !data.token) {
+        throw new Error('Signup response missing token')
+      }
+      opts.storage?.setToken(data.token)
+      return data
+    },
+
     async googleLogin(idToken) {
       const res = await client.post('/auth/google-login', { idToken })
       const envelope = res.data as { status?: string; data?: LoginResponse }
@@ -177,6 +270,63 @@ export function createAuthService(
       })
       const envelope = res.data as { status?: string; message?: string }
       return { message: envelope?.message }
+    },
+
+    async changePassword(currentPassword, newPassword, confirmPassword) {
+      const res = await client.post('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword,
+      })
+      const envelope = res.data as { status?: string; message?: string }
+      return { message: envelope?.message }
+    },
+
+    async verifyAccount(token) {
+      const res = await client.post('/auth/verify-account', {
+        verify_token: token,
+      })
+      const envelope = res.data as { status?: string; data?: LoginResponse }
+      const data = envelope?.data
+      if (!data || !data.token) {
+        throw new Error('Verify-account response missing token')
+      }
+      opts.storage?.setToken(data.token)
+      return data
+    },
+
+    async resendVerificationEmail(email) {
+      // Same enumeration-prevention as forgotPassword: backend returns
+      // generic success regardless of whether the email exists.
+      const res = await client.post('/auth/resend-email', {
+        email: email.trim().toLowerCase(),
+      })
+      const envelope = res.data as { status?: string; message?: string }
+      return { message: envelope?.message }
+    },
+
+    async updateProfile(payload) {
+      // Multipart: backend reads File from req.files.profile_photo and
+      // text fields from req.body. Letting axios infer Content-Type from
+      // FormData is correct; explicitly setting 'multipart/form-data'
+      // without a boundary breaks some servers, so we don't pass headers.
+      const formData = new FormData()
+      if (payload.first_name !== undefined) {
+        formData.append('first_name', payload.first_name)
+      }
+      if (payload.last_name !== undefined) {
+        formData.append('last_name', payload.last_name)
+      }
+      if (payload.profile_photo) {
+        formData.append('profile_photo', payload.profile_photo)
+      }
+      const res = await client.patch('/auth/edit-profile', formData)
+      const envelope = res.data as {
+        status?: string
+        message?: string
+        data?: AuthUser
+      }
+      return { user: envelope?.data, message: envelope?.message }
     },
 
     async fetchMe() {

@@ -19,7 +19,9 @@ export type {
   AuthService,
   AuthUser,
   LoginPayload,
+  SignupPayload,
   LoginResponse,
+  ProfileUpdatePayload,
   MembershipInfo,
   MeFullResponse,
 } from './services/auth.service'
